@@ -183,17 +183,27 @@ func (s *stateObject) GetState(db Database, key common.Hash) common.Hash {
 	return s.GetCommittedState(db, key)
 }
 
+func inc_metric(metric *int) {
+	if metrics.EnabledExpensive {
+		*metric += 1
+	}
+}
+
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (s *stateObject) GetCommittedState(db Database, key common.Hash) common.Hash {
+	inc_metric(&s.db.StorageTotalAccesses)
+
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
 	if s.fakeStorage != nil {
 		return s.fakeStorage[key]
 	}
 	// If we have a pending write or clean cached, return that
 	if value, pending := s.pendingStorage[key]; pending {
+		inc_metric(&s.db.StorageCacheHits)
 		return value
 	}
 	if value, cached := s.originStorage[key]; cached {
+		inc_metric(&s.db.StorageCacheHits)
 		return value
 	}
 	// If no live objects are available, attempt to use snapshots
@@ -215,6 +225,7 @@ func (s *stateObject) GetCommittedState(db Database, key common.Hash) common.Has
 		enc, err = s.db.snap.Storage(s.addrHash, crypto.Keccak256Hash(key.Bytes()))
 		if metrics.EnabledExpensive {
 			s.db.SnapshotStorageReads += time.Since(start)
+			s.db.StorageSnapHits += 1
 		}
 	}
 	// If the snapshot is unavailable or reading from it fails, load from the database.

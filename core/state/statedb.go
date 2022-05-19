@@ -122,6 +122,10 @@ type StateDB struct {
 	StorageUpdated int
 	AccountDeleted int
 	StorageDeleted int
+
+	StorageCacheHits     int
+	StorageSnapHits      int
+	StorageTotalAccesses int
 }
 
 // New creates a new state from a given trie.
@@ -957,8 +961,12 @@ func (s *StateDB) Commit(deleteEmptyObjects bool) (common.Hash, error) {
 		storageDeletedMeter.Mark(int64(s.StorageDeleted))
 		accountCommittedMeter.Mark(int64(accountCommitted))
 		storageCommittedMeter.Mark(int64(storageCommitted))
+		storageCacheTotHitMeter.Mark(int64(s.StorageCacheHits))
+		storageTotAccessMeter.Mark(int64(s.StorageTotalAccesses))
+		storageTotAccessMeter.Mark(int64(s.StorageSnapHits))
 		s.AccountUpdated, s.AccountDeleted = 0, 0
 		s.StorageUpdated, s.StorageDeleted = 0, 0
+		s.StorageCacheHits, s.StorageTotalAccesses, s.StorageSnapHits = 0, 0, 0
 	}
 	// If snapshotting is enabled, update the snapshot tree with this new version
 	if s.snap != nil {
