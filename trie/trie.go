@@ -27,6 +27,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
@@ -36,6 +37,12 @@ var (
 
 	// emptyState is the known hash of an empty state trie entry.
 	emptyState = crypto.Keccak256Hash(nil)
+)
+
+var (
+	StorageBranchNodesHit           = metrics.NewRegisteredMeter("state/extra_stats/branches", nil)
+	StorageTotNodesHit              = metrics.NewRegisteredMeter("state/extra_stats/tot_nodes", nil)
+	StoragePercNodesThatAreBranches = metrics.NewRegisteredGaugeFloat64("state/extra_stats/percent_nodes_that_are_branches", nil)
 )
 
 // LeafCallback is a callback type invoked when a trie operation reaches a leaf
@@ -116,14 +123,30 @@ func (t *Trie) Get(key []byte) []byte {
 // The value bytes must not be modified by the caller.
 // If a node was not found in the database, a MissingNodeError is returned.
 func (t *Trie) TryGet(key []byte) ([]byte, error) {
-	value, newroot, didResolve, err := t.tryGet(t.root, keybytesToHex(key), 0)
+	var stats = TrieStats{}
+	value, newroot, didResolve, err := t.tryGet(t.root, keybytesToHex(key), 0, &stats)
+
 	if err == nil && didResolve {
 		t.root = newroot
 	}
+
+	if metrics.EnabledExpensive {
+		StorageTotNodesHit.Mark(int64(stats.tot_nodes))
+		StorageBranchNodesHit.Mark(int64(stats.tot_branches))
+		StoragePercNodesThatAreBranches.Update(float64(StorageBranchNodesHit.Count()) / float64(StorageTotNodesHit.Count()))
+	}
+
 	return value, err
 }
 
-func (t *Trie) tryGet(origNode node, key []byte, pos int) (value []byte, newnode node, didResolve bool, err error) {
+type TrieStats struct {
+	tot_branches int
+	tot_nodes    int
+}
+
+func (t *Trie) tryGet(origNode node, key []byte, pos int, t_stats *TrieStats) (value []byte, newnode node, didResolve bool, err error) {
+	t_stats.tot_nodes += 1
+
 	switch n := (origNode).(type) {
 	case nil:
 		return nil, nil, false, nil
@@ -134,14 +157,16 @@ func (t *Trie) tryGet(origNode node, key []byte, pos int) (value []byte, newnode
 			// key not found in trie
 			return nil, n, false, nil
 		}
-		value, newnode, didResolve, err = t.tryGet(n.Val, key, pos+len(n.Key))
+		value, newnode, didResolve, err = t.tryGet(n.Val, key, pos+len(n.Key), t_stats)
 		if err == nil && didResolve {
 			n = n.copy()
 			n.Val = newnode
 		}
 		return value, n, didResolve, err
 	case *fullNode:
-		value, newnode, didResolve, err = t.tryGet(n.Children[key[pos]], key, pos+1)
+		t_stats.tot_branches += 1
+
+		value, newnode, didResolve, err = t.tryGet(n.Children[key[pos]], key, pos+1, t_stats)
 		if err == nil && didResolve {
 			n = n.copy()
 			n.Children[key[pos]] = newnode
@@ -152,7 +177,7 @@ func (t *Trie) tryGet(origNode node, key []byte, pos int) (value []byte, newnode
 		if err != nil {
 			return nil, n, true, err
 		}
-		value, newnode, _, err := t.tryGet(child, key, pos)
+		value, newnode, _, err := t.tryGet(child, key, pos, t_stats)
 		return value, newnode, true, err
 	default:
 		panic(fmt.Sprintf("%T: invalid node: %v", origNode, origNode))

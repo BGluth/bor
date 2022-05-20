@@ -230,6 +230,8 @@ func (s *stateObject) GetCommittedState(db Database, key common.Hash) common.Has
 	}
 	// If the snapshot is unavailable or reading from it fails, load from the database.
 	if s.db.snap == nil || err != nil {
+		inc_metric(&s.db.StorageTotalTrieAccesses)
+
 		start := time.Now()
 		enc, err = s.getTrie(db).TryGet(key.Bytes())
 		if metrics.EnabledExpensive {

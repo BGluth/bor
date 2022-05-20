@@ -123,9 +123,10 @@ type StateDB struct {
 	AccountDeleted int
 	StorageDeleted int
 
-	StorageCacheHits     int
-	StorageSnapHits      int
-	StorageTotalAccesses int
+	StorageCacheHits         int
+	StorageSnapHits          int
+	StorageTotalAccesses     int
+	StorageTotalTrieAccesses int
 }
 
 // New creates a new state from a given trie.
@@ -961,12 +962,17 @@ func (s *StateDB) Commit(deleteEmptyObjects bool) (common.Hash, error) {
 		storageDeletedMeter.Mark(int64(s.StorageDeleted))
 		accountCommittedMeter.Mark(int64(accountCommitted))
 		storageCommittedMeter.Mark(int64(storageCommitted))
-		storageCacheTotHitMeter.Mark(int64(s.StorageCacheHits))
-		storageTotAccessMeter.Mark(int64(s.StorageTotalAccesses))
-		storageTotAccessMeter.Mark(int64(s.StorageSnapHits))
+		StorageCacheTotHitMeter.Mark(int64(s.StorageCacheHits))
+		StorageSnapHitMeter.Mark(int64(s.StorageSnapHits))
+		StorageTotAccessMeter.Mark(int64(s.StorageTotalAccesses))
+		StorageTotTrieAccessMeter.Mark(int64(s.StorageTotalTrieAccesses))
+
+		var tot_hits = StorageCacheTotHitMeter.Count() + StorageSnapHitMeter.Count()
+		StorageCacheHitRateMeter.Update(float64(tot_hits) / float64(s.StorageTotalAccesses))
+
 		s.AccountUpdated, s.AccountDeleted = 0, 0
 		s.StorageUpdated, s.StorageDeleted = 0, 0
-		s.StorageCacheHits, s.StorageTotalAccesses, s.StorageSnapHits = 0, 0, 0
+		s.StorageCacheHits, s.StorageTotalAccesses, s.StorageSnapHits, s.StorageTotalTrieAccesses = 0, 0, 0, 0
 	}
 	// If snapshotting is enabled, update the snapshot tree with this new version
 	if s.snap != nil {

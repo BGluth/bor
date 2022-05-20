@@ -33,6 +33,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
 )
@@ -75,6 +76,12 @@ const (
 
 	// staleThreshold is the maximum depth of the acceptable stale block.
 	staleThreshold = 7
+)
+
+var (
+	BlocksTotalBlocksMeter = metrics.NewRegisteredMeter("state/blocks/tot_blocks", nil)
+	BlocksTotalTxnsMeter   = metrics.NewRegisteredMeter("state/blocks/tot_txns", nil)
+	BlocksTxnsPerBlock     = metrics.NewRegisteredGaugeFloat64("state/blocks/avg_txns_per_block", nil)
 )
 
 // environment is the worker's current environment and holds all
@@ -961,6 +968,16 @@ func (w *worker) commitTransactions(env *environment, txs *types.TransactionsByP
 	if interrupt != nil {
 		w.resubmitAdjustCh <- &intervalAdjust{inc: false}
 	}
+
+	if metrics.EnabledExpensive {
+		BlocksTotalTxnsMeter.Mark(int64(txs.Len()))
+		BlocksTotalBlocksMeter.Mark(1)
+		BlocksTxnsPerBlock.Update(float64(BlocksTotalTxnsMeter.Count()) / float64(BlocksTotalBlocksMeter.Count()))
+
+		state.NodesPerTrieAccess.Update(float64(state.StorageTotTrieAccessMeter.Count()) / float64(trie.StorageTotNodesHit.Count()))
+		state.BranchesPerTrieAccess.Update(float64(state.StorageTotAccessMeter.Count()) / float64(trie.StorageBranchNodesHit.Count()))
+	}
+
 	return false
 }
 
